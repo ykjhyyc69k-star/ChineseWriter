@@ -231,6 +231,7 @@
         document.getElementById('parent-msg').textContent = e.message;
       }
     }
+    async function loadAnnouncements() {
       try {
         const notes = await api('/api/announcements');
         const el = document.getElementById('announcements');
@@ -241,13 +242,13 @@
           '</div>'
       } catch {}
     }
-
-    function speak(text) {
+      function speak(text) {
       if (!text || !window.speechSynthesis) return;
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'zh-CN';
       speechSynthesis.speak(u);
     }
+      function showApp() {
       document.getElementById('auth-card').classList.add('hidden');
       document.getElementById('app').classList.remove('hidden');
       document.getElementById('current-user').textContent = currentUser.username + (currentUser.role === 'parent' ? ' (parent)' : '');
