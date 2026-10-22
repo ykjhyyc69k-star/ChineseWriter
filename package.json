@@ -1,0 +1,20 @@
+{
+  "name": "chinese-character-writer",
+  "version": "1.0.0",
+  "description": "Hosted web app for learning Chinese character writing with user accounts and synced lists",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "express-session": "^1.18.0",
+    "better-sqlite3": "^11.3.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "nodemailer": "^6.9.15",
+    "express-rate-limit": "^7.4.1"
+  }
+}

@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="theme-color" content="#4da3ff">
+  <link rel="manifest" href="/manifest.json">
+  <script>
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+  </script>
+  <title>Chinese Character Writer</title>
+  <script src="https://cdn.jsdelivr.net/npm/hanzi-writer@3.5.0/dist/hanzi-writer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.29.5/dist/index.js"></script>
+  <style>
+    :root {
+      --bg: #0f1115; --surface: #1a1d24; --surface2: #242830; --text: #e8eaed;
+      --muted: #9aa0a6; --accent: #4da3ff; --success: #34c759; --danger: #ff453a; --border: #2e333b;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 16px; line-height: 1.5; }
+    h1 { font-size: 1.5rem; margin: 0 0 8px; }
+    .subtitle { color: var(--muted); margin-bottom: 20px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+    textarea, input[type="text"], input[type="password"] { width: 100%; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-size: 1rem; font-family: inherit; }
+    textarea { min-height: 120px; resize: vertical; }
+    textarea:focus, input:focus { outline: none; border-color: var(--accent); }
+    .hint { font-size: 0.8rem; color: var(--muted); margin-top: 6px; }
+    button { background: var(--accent); color: #fff; border: none; border-radius: 10px; padding: 10px 16px; font-size: 0.95rem; font-weight: 600; cursor: pointer; margin: 4px 4px 4px 0; }
+    button.secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    button.success { background: var(--success); }
+    button.danger { background: var(--danger); }
+    .vocab-list, .saved-lists { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .vocab-item, .list-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 1.05rem; }
+    .vocab-item:hover, .vocab-item.active, .list-item:hover { border-color: var(--accent); }
+    .vocab-item small, .list-item small { display: block; font-size: 0.75rem; color: var(--muted); }
+    #writer-target { width: min(480px, 95vw); height: min(480px, 95vw); background: #fff; border-radius: 12px; border: 2px solid var(--border); margin: 12px auto; }
+    .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+    .prompt { font-size: 1.2rem; text-align: center; min-height: 2em; color: var(--accent); }
+    .status { text-align: center; color: var(--muted); font-size: 0.9rem; }
+    .mode-toggle { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .user-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .hidden { display: none !important; }
+    footer { text-align: center; color: var(--muted); font-size: 0.8rem; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <h1>Chinese Character Writer</h1>
+  <p class="subtitle">Practice writing characters. Lists sync across all your devices.</p>
+
+  <div class="card" id="auth-card">
+    <strong>Log in or register</strong>
+    <input type="text" id="auth-user" placeholder="Username or email" autocomplete="username">
+    <input type="password" id="auth-pass" placeholder="Password" autocomplete="current-password" style="margin-top:8px;">
+    <div style="margin-top:12px;">
+      <button onclick="doLogin()">Log in</button>
+      <button class="secondary" onclick="doRegister()">Register (first user = parent)</button>
+    </div>
+    <div style="margin-top:8px;">
+      <button class="secondary" onclick="window.location='/auth/google'">Continue with Google</button>
+    </div>
+    <div style="margin-top:12px;">
+      <input type="email" id="forgot-email" placeholder="Email for password reset" style="max-width:220px; display:inline-block;">
+      <button class="secondary" onclick="forgotPassword()">Forgot password</button>
+    </div>
+    <div class="hint" id="auth-msg"></div>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="user-bar">
+      <span>Logged in as <strong id="current-user"></strong></span>
+      <div>
+        <button class="secondary" onclick="toggleTheme()">Theme</button>
+        <button class="secondary" onclick="logout()">Log out</button>
+      </div>
+    </div>
+    <div id="streak-bar" class="hint" style="text-align:center; margin-bottom:8px;"></div>
+    <div style="text-align:center; margin-bottom:12px;">
+      <button class="secondary" onclick="loadDue()">Due today</button>
+    </div>
+    <div id="announcements" class="card" style="display:none;"></div>
+    <div id="due-list" class="saved-lists" style="margin-bottom:16px;"></div>
+
+    <div class="card">
+      <strong>Your lists</strong>
+      <div class="saved-lists" id="saved-lists"></div>
+      <div style="margin-top:12px;">
+        <input type="text" id="new-list-name" placeholder="New list name" style="max-width:220px; display:inline-block;">
+        <button onclick="createList()">Create list</button>
+      </div>
+    </div>
+
+    <div class="card" id="parent-card" style="display:none;">
+      <strong>Parent / Teacher panel</strong>
+      <div style="margin-top:12px;">
+        <input type="text" id="new-student-user" placeholder="New student username" style="max-width:180px; display:inline-block;">
+        <input type="password" id="new-student-pass" placeholder="Password" style="max-width:140px; display:inline-block;">
+        <select id="new-rel" style="padding:8px; border-radius:8px; background:#242830; color:#e8eaed; border:1px solid #2e333b;">
+          <option value="parent">as Parent</option>
+          <option value="teacher">as Teacher</option>
+        </select>
+        <button onclick="createStudent()">Create & link</button>
+      </div>
+      <div style="margin-top:8px;">
+        <input type="text" id="link-student-user" placeholder="Existing student username" style="max-width:200px; display:inline-block;">
+        <select id="link-rel" style="padding:8px; border-radius:8px; background:#242830; color:#e8eaed; border:1px solid #2e333b;">
+          <option value="teacher">as Teacher</option>
+          <option value="parent">as Parent</option>
+        </select>
+        <button class="secondary" onclick="linkStudent()">Link existing</button>
+      </div>
+      <div id="students-list" class="saved-lists" style="margin-top:12px;"></div>
+      <div style="margin-top:12px;">
+        <input type="text" id="reset-user" placeholder="Student username" style="max-width:180px; display:inline-block;">
+        <input type="password" id="reset-pass" placeholder="New password" style="max-width:140px; display:inline-block;">
+        <button onclick="resetStudentPassword()">Reset password</button>
+      </div>
+      <div style="margin-top:12px;">
+        <input type="text" id="note-student" placeholder="Student username" style="max-width:180px; display:inline-block;">
+        <input type="text" id="note-message" placeholder="Note / homework" style="max-width:220px; display:inline-block;">
+        <button class="secondary" onclick="sendNote()">Send note</button>
+      </div>
+      <div class="hint" id="parent-msg"></div>
+    </div>
+
+    <div class="card">
+      <label><strong>Edit current list</strong></label>
+      <textarea id="vocab" placeholder="One entry per line.&#10;你好&#10;谢谢 | thank you&#10;学习 | xuéxí | to study"></textarea>
+      <div class="hint">Pinyin with tone marks is generated automatically. Changes are saved to your account.</div>
+      <button onclick="saveCurrentList()">Save list</button>
+      <button class="secondary" onclick="document.getElementById('fileInput').click()">Load from file</button>
+      <input type="file" id="fileInput" accept=".txt,.text" style="display:none" onchange="loadFromFile(event)">
+      <button class="secondary" onclick="loadExample()">Load example</button>
+      <button class="danger" onclick="deleteCurrentList()">Delete list</button>
+    </div>
+
+    <div class="card" id="list-card" style="display:none;">
+      <strong>Select a word to practice</strong>
+      <div class="vocab-list" id="vocab-list"></div>
+    </div>
+
+    <div class="card" id="practice-card" style="display:none;">
+      <div class="mode-toggle">
+        <button id="btn-learn" class="secondary" onclick="setMode('learn')">Learn</button>
+        <button id="btn-quiz" class="secondary" onclick="setMode('quiz')">Quiz</button>
+        <button id="btn-dictation" class="secondary" onclick="setMode('dictation')">Dictation</button>
+      </div>
+      <div class="prompt" id="prompt"></div>
+      <div id="writer-target"></div>
+      <div class="controls">
+        <button onclick="animate()">Animate</button>
+        <button onclick="startQuiz()">Practice writing</button>
+        <button class="secondary" onclick="speak(currentItem?.text || '')">Speak</button>
+        <button class="secondary" onclick="resetWriter()">Reset</button>
+        <button class="secondary" onclick="nextChar()">Next character</button>
+      </div>
+      <div class="status" id="status">Ready</div>
+    </div>
+  </div>
+
+  <footer>Stroke data by Hanzi Writer · Your data is stored on the server</footer>
+
+  <script>
+    let currentUser = null;
+    let lists = [];
+    let currentListId = null;
+    let vocab = [];
+    let currentItem = null;
+    let currentCharIndex = 0;
+    let writer = null;
+    let mode = 'learn';
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, {
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+        ...opts,
+        body: opts.body ? JSON.stringify(opts.body) : undefined
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function showAuth(msg = '') {
+      document.getElementById('auth-card').classList.remove('hidden');
+      document.getElementById('app').classList.add('hidden');
+      document.getElementById('auth-msg').textContent = msg;
+    }
+    function toggleTheme() {
+      document.body.classList.toggle('light');
+      localStorage.setItem('theme', document.body.classList.contains('light') ? 'light' : 'dark');
+    }
+    if (localStorage.getItem('theme') === 'light') document.body.classList.add('light');
+
+    async function loadStreak() {
+      try {
+        const s = await api('/api/streak');
+        document.getElementById('streak-bar').textContent = `Streak: ${s.current_streak || 0} days · Today: ${s.today_count || 0}/${s.daily_goal || 10}`;
+      } catch {}
+    }
+
+    async function loadDue() {
+      try {
+        const due = await api('/api/progress/due');
+        const el = document.getElementById('due-list');
+        el.innerHTML = '';
+        if (!due.length) {
+          el.innerHTML = '<span class="hint">Nothing due right now.</span>';
+          return;
+        }
+        due.forEach(p => {
+          const div = document.createElement('div');
+          div.className = 'list-item';
+          div.innerHTML = `${p.character} <small>${p.word || ''} · mastery ${p.mastery}/5</small>`;
+          el.appendChild(div);
+        });
+      } catch (e) {
+        document.getElementById('due-list').innerHTML = '<span class="hint">Could not load due items.</span>';
+      }
+    }
+
+    async function sendNote() {
+      const studentUsername = document.getElementById('note-student').value.trim();
+      const message = document.getElementById('note-message').value.trim();
+      if (!studentUsername || !message) return alert('Student and note required');
+      try {
+        await api('/api/announcements', { method: 'POST', body: { studentUsername, message } });
+        document.getElementById('parent-msg').textContent = 'Note sent';
+        document.getElementById('note-student').value = '';
+        document.getElementById('note-message').value = '';
+      } catch (e) {
+        document.getElementById('parent-msg').textContent = e.message;
+      }
+    }
+      try {
+        const notes = await api('/api/announcements');
+        const el = document.getElementById('announcements');
+        if (!notes.length) { el.style.display = 'none'; return; }
+        el.style.display = 'block';
+        el.innerHTML = '<strong>Notes from parent/teacher</strong><div style="margin-top:8px;">' +
+          notes.map(n => `<div class="hint">${n.from_user}: ${n.message} <small>(${new Date(n.created_at).toLocaleDateString()})</small></div>`).join('') +
+          '</div>';
+      } catch {}
+    }
+
+    function speak(text) {
+      if (!text || !window.speechSynthesis) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'zh-CN';
+      speechSynthesis.speak(u);
+    }
+      document.getElementById('auth-card').classList.add('hidden');
+      document.getElementById('app').classList.remove('hidden');
+      document.getElementById('current-user').textContent = currentUser.username + (currentUser.role === 'parent' ? ' (parent)' : '');
+      if (currentUser.role === 'parent') {
+        document.getElementById('parent-card').style.display = 'block';
+        loadStudents();
+      } else {
+        document.getElementById('parent-card').style.display = 'none';
+      }
+      loadLists();
+      loadStreak();
+      loadAnnouncements();
+    }
+
+    async function loadStudents() {
+      try {
+        const students = await api('/api/parent/students');
+        const el = document.getElementById('students-list');
+        el.innerHTML = '';
+        if (!students.length) {
+          el.innerHTML = '<span class="hint">No students yet.</span>';
+          return;
+        }
+        students.forEach(s => {
+          const div = document.createElement('div');
+          div.className = 'list-item';
+          div.innerHTML = `${s.username} <small>${s.relationship || ''} · ${s.characters_practiced || 0} chars · ${s.total_practices || 0} practices</small>`;
+          el.appendChild(div);
+        });
+      } catch (e) {
+        document.getElementById('parent-msg').textContent = e.message;
+      }
+    }
+
+    async function createStudent() {
+      const username = document.getElementById('new-student-user').value.trim();
+      const password = document.getElementById('new-student-pass').value;
+      const relationship = document.getElementById('new-rel').value;
+      if (!username || !password) return alert('Username and password required');
+      try {
+        await api('/api/parent/create-student', { method: 'POST', body: { username, password, relationship } });
+        document.getElementById('parent-msg').textContent = `Student ${username} created and linked as ${relationship}`;
+        document.getElementById('new-student-user').value = '';
+        document.getElementById('new-student-pass').value = '';
+        loadStudents();
+      } catch (e) {
+        document.getElementById('parent-msg').textContent = e.message;
+      }
+    }
+
+    async function linkStudent() {
+      const username = document.getElementById('link-student-user').value.trim();
+      const relationship = document.getElementById('link-rel').value;
+      if (!username) return alert('Student username required');
+      try {
+        await api('/api/parent/link-student', { method: 'POST', body: { username, relationship } });
+        document.getElementById('parent-msg').textContent = `Linked to ${username} as ${relationship}`;
+        document.getElementById('link-student-user').value = '';
+        loadStudents();
+      } catch (e) {
+        document.getElementById('parent-msg').textContent = e.message;
+      }
+    }
+
+    async function resetStudentPassword() {
+      const username = document.getElementById('reset-user').value.trim();
+      const newPassword = document.getElementById('reset-pass').value;
+      if (!username || !newPassword) return alert('Username and new password required');
+      try {
+        await api('/api/parent/reset-password', { method: 'POST', body: { username, newPassword } });
+        document.getElementById('parent-msg').textContent = `Password reset for ${username}`;
+        document.getElementById('reset-user').value = '';
+        document.getElementById('reset-pass').value = '';
+      } catch (e) {
+        document.getElementById('parent-msg').textContent = e.message;
+      }
+    }
+
+    async function checkSession() {
+      try {
+        const { user } = await api('/api/me');
+        if (user) { currentUser = user; showApp(); }
+        else showAuth();
+      } catch { showAuth(); }
+    }
+
+    async function doRegister() {
+      const username = document.getElementById('auth-user').value.trim();
+      const password = document.getElementById('auth-pass').value;
+      try {
+        await api('/api/register', { method: 'POST', body: { username, password } });
+        currentUser = { username };
+        showApp();
+      } catch (e) { showAuth(e.message); }
+    }
+
+    async function forgotPassword() {
+      const email = document.getElementById('forgot-email').value.trim();
+      if (!email) return alert('Enter your email');
+      try {
+        const data = await api('/api/forgot-password', { method: 'POST', body: { email } });
+        document.getElementById('auth-msg').textContent = data.message || 'Check your email (or console) for the reset link.';
+        if (data.resetUrl) document.getElementById('auth-msg').textContent += ' ' + data.resetUrl;
+      } catch (e) {
+        document.getElementById('auth-msg').textContent = e.message;
+      }
+    }
+
+    async function logout() {
+      await api('/api/logout', { method: 'POST' });
+      currentUser = null;
+      currentListId = null;
+      showAuth();
+    }
+
+    async function loadLists() {
+      lists = await api('/api/lists');
+      const el = document.getElementById('saved-lists');
+      el.innerHTML = '';
+      lists.forEach(l => {
+        const div = document.createElement('div');
+        div.className = 'list-item';
+        const count = (l.content || '').split('\n').filter(Boolean).length;
+        div.innerHTML = `${l.name} <small>${count} entries</small>`;
+        div.onclick = () => openList(l);
+        el.appendChild(div);
+      });
+      if (!lists.length) el.innerHTML = '<span class="hint">No lists yet.</span>';
+      loadProgress();
+    }
+
+    async function loadProgress() {
+      try {
+        const progress = await api('/api/progress');
+        const summary = document.getElementById('progress-summary');
+        const listEl = document.getElementById('progress-list');
+        listEl.innerHTML = '';
+        if (!progress.length) {
+          summary.textContent = 'No practice recorded yet. Complete a quiz to start tracking.';
+          return;
+        }
+        const total = progress.reduce((s, p) => s + p.practiced, 0);
+        const correct = progress.reduce((s, p) => s + p.correct, 0);
+        summary.textContent = `${progress.length} characters practiced · ${total} total attempts · ${correct} correct`;
+        progress.slice(0, 20).forEach(p => {
+          const div = document.createElement('div');
+          div.className = 'list-item';
+          const rate = p.practiced ? Math.round((p.correct / p.practiced) * 100) : 0;
+          div.innerHTML = `${p.character} <small>${p.practiced}× · ${rate}% · ${p.word || ''}</small>`;
+          listEl.appendChild(div);
+        });
+      } catch (e) {
+        document.getElementById('progress-summary').textContent = 'Could not load progress.';
+      }
+    }
+
+    function openList(list) {
+      currentListId = list.id;
+      document.getElementById('vocab').value = list.content || '';
+      loadVocab();
+    }
+
+    async function createList() {
+      const name = document.getElementById('new-list-name').value.trim();
+      if (!name) return alert('Enter a name');
+      try {
+        const list = await api('/api/lists', { method: 'POST', body: { name } });
+        document.getElementById('new-list-name').value = '';
+        await loadLists();
+        openList(list);
+      } catch (e) { alert(e.message); }
+    }
+
+    async function saveCurrentList() {
+      if (!currentListId) return alert('Select or create a list first');
+      const content = document.getElementById('vocab').value;
+      await api(`/api/lists/${currentListId}`, { method: 'PUT', body: { content } });
+      await loadLists();
+      alert('Saved');
+    }
+
+    async function deleteCurrentList() {
+      if (!currentListId || !confirm('Delete this list?')) return;
+      await api(`/api/lists/${currentListId}`, { method: 'DELETE' });
+      currentListId = null;
+      document.getElementById('vocab').value = '';
+      document.getElementById('list-card').style.display = 'none';
+      document.getElementById('practice-card').style.display = 'none';
+      await loadLists();
+    }
+
+    function parseLine(line) {
+      const parts = line.split('|').map(s => s.trim());
+      const chars = parts[0] || '';
+      let pinyin = parts[1] || '';
+      const meaning = parts[2] || '';
+      if (!pinyin && chars && typeof pinyinPro !== 'undefined') {
+        try { pinyin = pinyinPro.pinyin(chars, { toneType: 'symbol', type: 'string' }); } catch {}
+      }
+      return { text: chars, pinyin, meaning, characters: [...chars].filter(c => /\p{Script=Han}/u.test(c)) };
+    }
+
+    function loadVocab() {
+      const raw = document.getElementById('vocab').value.trim();
+      if (!raw) {
+        vocab = [];
+        document.getElementById('list-card').style.display = 'none';
+        document.getElementById('practice-card').style.display = 'none';
+        return;
+      }
+      vocab = raw.split('\n').map(l => l.trim()).filter(Boolean).map(parseLine).filter(v => v.characters.length);
+      const el = document.getElementById('vocab-list');
+      el.innerHTML = '';
+      vocab.forEach((item, i) => {
+        const div = document.createElement('div');
+        div.className = 'vocab-item';
+        div.innerHTML = `${item.text}${item.pinyin ? `<small>${item.pinyin}</small>` : ''}${item.meaning ? `<small>${item.meaning}</small>` : ''}`;
+        div.onclick = () => selectItem(i);
+        el.appendChild(div);
+      });
+      document.getElementById('list-card').style.display = 'block';
+      document.getElementById('practice-card').style.display = 'none';
+    }
+
+    function loadExample() {
+      document.getElementById('vocab').value = `你好\n谢谢 | thank you\n学习\n中国\n朋友`;
+      loadVocab();
+    }
+
+    function loadFromFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => { document.getElementById('vocab').value = e.target.result; loadVocab(); event.target.value = ''; };
+      reader.readAsText(file);
+    }
+
+    function selectItem(index) {
+      currentItem = vocab[index];
+      currentCharIndex = 0;
+      document.querySelectorAll('.vocab-item').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.vocab-item')[index].classList.add('active');
+      document.getElementById('practice-card').style.display = 'block';
+      loadCharacter();
+    }
+
+    function setMode(m) {
+      mode = m;
+      document.querySelectorAll('.mode-toggle button').forEach(b => b.classList.remove('success'));
+      document.getElementById('btn-' + m).classList.add('success');
+      if (currentItem) loadCharacter();
+    }
+
+    function loadCharacter() {
+      if (!currentItem || !currentItem.characters.length) return;
+      const char = currentItem.characters[currentCharIndex];
+      const target = document.getElementById('writer-target');
+      target.innerHTML = '';
+      writer = HanziWriter.create('writer-target', char, {
+        width: 480, height: 480, padding: 20,
+        showOutline: mode === 'learn', showCharacter: mode === 'learn',
+        strokeAnimationSpeed: 1, delayBetweenStrokes: 200,
+        strokeColor: '#333', radicalColor: '#4da3ff', highlightColor: '#7c5cff',
+        outlineColor: '#ddd', drawingColor: '#333', drawingWidth: 24,
+        showHintAfterMisses: 2, highlightOnComplete: true
+      });
+
+      // Add stroke numbers in Learn mode
+      if (mode === 'learn') {
+        HanziWriter.loadCharacterData(char).then(data => {
+          if (!data || !data.medians) return;
+          const svg = target.querySelector('svg');
+          if (!svg) return;
+          // Remove any previous numbers
+          svg.querySelectorAll('.stroke-number').forEach(el => el.remove());
+
+          const size = 480;
+          const padding = 20;
+          const usable = size - padding * 2;
+
+          data.medians.forEach((median, i) => {
+            if (!median || !median.length) return;
+            // Place number near the start of the stroke
+            const [x, y] = median[0];
+            // Convert from 0-1024 coordinate space to SVG
+            const svgX = padding + (x / 1024) * usable;
+            const svgY = padding + ((1024 - y) / 1024) * usable; // y is inverted in the data
+
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', svgX);
+            text.setAttribute('y', svgY);
+            text.setAttribute('class', 'stroke-number');
+            text.setAttribute('font-size', '22');
+            text.setAttribute('font-weight', 'bold');
+            text.setAttribute('fill', '#e11d48');
+            text.setAttribute('stroke', 'white');
+            text.setAttribute('stroke-width', '3');
+            text.setAttribute('paint-order', 'stroke');
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('dominant-baseline', 'middle');
+            text.textContent = String(i + 1);
+            svg.appendChild(text);
+          });
+        }).catch(() => {});
+      }
+
+      const promptEl = document.getElementById('prompt');
+      if (mode === 'dictation') {
+        const parts = [];
+        if (currentItem.pinyin) parts.push(currentItem.pinyin);
+        if (currentItem.meaning) parts.push(currentItem.meaning);
+        promptEl.textContent = parts.length ? parts.join(' · ') : '(no hint)';
+      } else if (mode === 'quiz') {
+        promptEl.innerHTML = `Write: <strong>${char}</strong>${currentItem.pinyin ? `<br><span style="font-size:0.85em;color:#9aa0a6">${currentItem.pinyin}</span>` : ''}`;
+      } else {
+        promptEl.innerHTML = `${currentItem.text}${currentItem.pinyin ? ` <span style="color:#9aa0a6">(${currentItem.pinyin})</span>` : ''} — ${currentCharIndex + 1}/${currentItem.characters.length}: <strong>${char}</strong>`;
+      }
+      document.getElementById('status').textContent = `Character ${currentCharIndex + 1} of ${currentItem.characters.length}`;
+    }
+
+    function animate() { if (writer) writer.animateCharacter(); }
+    function startQuiz() {
+      if (!writer) return;
+      document.getElementById('status').textContent = 'Writing…';
+      writer.quiz({
+        onComplete: async () => {
+          document.getElementById('status').textContent = 'Correct!';
+          // Record progress
+          if (currentItem) {
+            const char = currentItem.characters[currentCharIndex];
+            try {
+              await api('/api/progress', {
+                method: 'POST',
+                body: { character: char, word: currentItem.text, correct: true }
+              });
+            } catch (e) { console.warn('Progress save failed', e); }
+          }
+          setTimeout(nextChar, 800);
+        },
+        onMistake: () => { document.getElementById('status').textContent = 'Try again'; }
+      });
+    }
+    function resetWriter() { if (writer) writer.cancelQuiz(); loadCharacter(); }
+    function nextChar() {
+      if (!currentItem) return;
+      currentCharIndex++;
+      if (currentCharIndex >= currentItem.characters.length) currentCharIndex = 0;
+      loadCharacter();
+    }
+
+    checkSession();
+    setMode('learn');
+  </script>
+</body>
+</html>

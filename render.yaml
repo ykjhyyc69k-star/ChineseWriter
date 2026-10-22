@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: chinese-character-writer
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
+    disk:
+      name: data
+      mountPath: /opt/render/project/src
+      sizeGB: 1
