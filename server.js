@@ -181,7 +181,7 @@ app.get('/auth/google/callback', passport.authenticate('google', { failureRedire
 });
 
 // Password reset request
-app.post('/api/forgot-password', (req, res) => {
+app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
