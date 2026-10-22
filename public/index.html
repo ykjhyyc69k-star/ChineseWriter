@@ -238,7 +238,7 @@
         el.style.display = 'block';
         el.innerHTML = '<strong>Notes from parent/teacher</strong><div style="margin-top:8px;">' +
           notes.map(n => `<div class="hint">${n.from_user}: ${n.message} <small>(${new Date(n.created_at).toLocaleDateString()})</small></div>`).join('') +
-          '</div>';
+          '</div>'
       } catch {}
     }
 
